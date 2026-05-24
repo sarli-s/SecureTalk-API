@@ -60,10 +60,13 @@ USEFUL PATTERN — how to save a new row:
   db.refresh(new_user)   ← fills in the auto-generated id and created_at
 """
 
+import asyncio
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sse_starlette.sse import EventSourceResponse
 
 from .models import User, Message, get_db
 from .schemas import (
@@ -72,6 +75,7 @@ from .schemas import (
 )
 from .auth import hash_password, verify_password, create_token, require_auth
 from .crypto import encrypt, decrypt
+from .broadcaster import broadcaster
 
 
 log = logging.getLogger(__name__)
@@ -105,7 +109,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 # TODO 3 — Send a message (authenticated)
 # ---------------------------------------------------------------------------
 @router.post("/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
-def send_message(
+async def send_message(
     body: SendMessageRequest,
     db: Session = Depends(get_db),
     username: str = Depends(require_auth),
@@ -114,7 +118,9 @@ def send_message(
     db.add(msg)
     db.commit()
     db.refresh(msg)
-    return MessageResponse(id=msg.id, sender=msg.sender, recipient=msg.recipient, content=body.content, created_at=msg.created_at)
+    response = MessageResponse(id=msg.id, sender=msg.sender, recipient=msg.recipient, content=body.content, created_at=msg.created_at)
+    await broadcaster.publish(response.model_dump(mode="json"))
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -132,3 +138,24 @@ def get_messages(
         MessageResponse(id=r.id, sender=r.sender, recipient=r.recipient, content=decrypt(r.ciphertext), created_at=r.created_at)
         for r in rows
     ]
+
+
+@router.get("/stream")
+async def stream(
+    username: str = Depends(require_auth),
+):
+    q = broadcaster.subscribe(username)
+    log.info("SSE CONNECT  user=%s", username)
+
+    async def event_generator():
+        try:
+            while True:
+                message = await q.get()
+                yield {"data": json.dumps(message, default=str)}
+        except asyncio.CancelledError:
+            pass
+        finally:
+            broadcaster.unsubscribe(username, q)
+            log.info("SSE DISCONNECT  user=%s", username)
+
+    return EventSourceResponse(event_generator())

@@ -18,6 +18,7 @@ HOW TESTS WORK HERE:
   wiped clean before every single test.
 """
 
+import asyncio
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -211,3 +212,61 @@ class TestMessaging:
         contents = [m["content"] for m in alice_msgs]
         assert "alice to bob" in contents
         assert "charlie to bob" not in contents
+
+
+# ===========================================================================
+# 4. SSE stream tests
+# ===========================================================================
+
+class TestSSE:
+
+    def test_stream_rejects_no_token(self, client):
+        r = client.get("/stream")
+        assert r.status_code in (401, 403)
+
+    def test_stream_rejects_bad_token(self, client):
+        r = client.get("/stream", headers={"Authorization": "Bearer fake"})
+        assert r.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_broadcaster_delivers_to_recipient(self):
+        """Message published to broadcaster arrives in recipient's queue."""
+        from server.broadcaster import Broadcaster
+        b = Broadcaster()
+        q = b.subscribe("bob")
+
+        msg = {"sender": "alice", "recipient": "bob", "content": "live message"}
+        await b.publish(msg)
+
+        received = await asyncio.wait_for(q.get(), timeout=2)
+        assert received["content"] == "live message"
+        assert received["sender"] == "alice"
+
+    @pytest.mark.asyncio
+    async def test_broadcaster_isolates_messages(self):
+        """Charlie→Bob message does NOT arrive in Alice's queue."""
+        from server.broadcaster import Broadcaster
+        b = Broadcaster()
+        alice_q   = b.subscribe("alice")
+        b.subscribe("bob")  # bob is connected but we don't check his queue
+
+        # charlie → bob: alice is not involved
+        await b.publish({"sender": "charlie", "recipient": "bob", "content": "secret"})
+        # alice → bob: alice IS the sender
+        await b.publish({"sender": "alice", "recipient": "bob", "content": "hello bob"})
+
+        received = await asyncio.wait_for(alice_q.get(), timeout=2)
+        assert received["content"] == "hello bob"   # got her own message
+        assert alice_q.empty()                       # nothing else in the queue
+
+    @pytest.mark.asyncio
+    async def test_broadcaster_unsubscribe(self):
+        """After unsubscribe, no more messages are delivered."""
+        from server.broadcaster import Broadcaster
+        b = Broadcaster()
+        q = b.subscribe("alice")
+        b.unsubscribe("alice", q)
+
+        await b.publish({"sender": "bob", "recipient": "alice", "content": "hello"})
+        assert q.empty()
+
