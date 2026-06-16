@@ -32,11 +32,16 @@ WHY A FRESH NONCE EVERY TIME?
 import os
 import base64
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from dotenv import load_dotenv
 
+load_dotenv()
 
-# 32 bytes = 256-bit key. os.urandom is cryptographically secure.
-# In production: load this from an environment variable, never hardcode it.
-_KEY: bytes = os.urandom(32)
+# Loaded from .env (AES_KEY=<64 hex chars>).
+# A persistent key means stored messages survive server restarts.
+_raw = os.environ.get("AES_KEY")
+if not _raw:
+    raise RuntimeError("AES_KEY environment variable is not set. Add it to your .env file.")
+_KEY: bytes = bytes.fromhex(_raw)
 
 
 def encrypt(plaintext: str) -> str:

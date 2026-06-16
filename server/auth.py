@@ -69,16 +69,22 @@ CONCEPT 3 — FASTAPI DEPENDENCY INJECTION
     Authorization: Bearer eyJhbGc...
 """
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
+from dotenv import load_dotenv
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+load_dotenv()
 
-SECRET_KEY = "change-this-to-a-long-random-string-in-production"
+_raw = os.environ.get("JWT_SECRET")
+if not _raw:
+    raise RuntimeError("JWT_SECRET environment variable is not set. Add it to your .env file.")
+SECRET_KEY = _raw
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
 

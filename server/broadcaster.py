@@ -16,15 +16,17 @@ class Broadcaster:
         if q in queues:
             queues.remove(q)
 
+    @property
+    def online_users(self) -> list[str]:
+        return [u for u, queues in self._subscribers.items() if queues]
+
     async def publish(self, message: dict):
         recipient = message.get("recipient")
         sender = message.get("sender")
-        notified = set()
         for username, queues in self._subscribers.items():
-            if username == recipient or username == sender:
+            if recipient == "all" or username == recipient or username == sender:
                 for q in queues:
                     await q.put(message)
-                notified.add(username)
 
 
 broadcaster = Broadcaster()

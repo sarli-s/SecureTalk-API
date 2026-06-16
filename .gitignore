@@ -23,6 +23,9 @@ env/
 .env
 .env.*
 
+# Instruction & assessment files (local only, not for Git)
+_docs/
+
 # IDE
 .vscode/
 .idea/

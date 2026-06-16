@@ -63,8 +63,10 @@ USEFUL PATTERN — how to save a new row:
 import asyncio
 import json
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
@@ -132,7 +134,7 @@ def get_messages(
     username: str = Depends(require_auth),
 ):
     rows = db.query(Message).filter(
-        (Message.sender == username) | (Message.recipient == username)
+        (Message.sender == username) | (Message.recipient == username) | (Message.recipient == "all")
     ).order_by(Message.created_at).all()
     return [
         MessageResponse(id=r.id, sender=r.sender, recipient=r.recipient, content=decrypt(r.ciphertext), created_at=r.created_at)
@@ -140,10 +142,23 @@ def get_messages(
     ]
 
 
+@router.get("/users/online")
+def get_online_users(username: str = Depends(require_auth)):
+    return {"online_users": broadcaster.online_users}
+
+
 @router.get("/stream")
 async def stream(
-    username: str = Depends(require_auth),
+    token: Optional[str] = None,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
 ):
+    raw_token = token or (credentials.credentials if credentials else None)
+    if not raw_token:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated")
+    from .auth import decode_token
+    username = decode_token(raw_token)
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
     q = broadcaster.subscribe(username)
     log.info("SSE CONNECT  user=%s", username)
 

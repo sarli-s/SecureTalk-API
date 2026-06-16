@@ -214,6 +214,16 @@ class TestMessaging:
         assert "charlie to bob" not in contents
 
 
+    def test_broadcast_to_all(self, client):
+        alice_token = register_and_login(client, "alice", "secret123")
+        bob_token   = register_and_login(client, "bob",   "secret456")
+
+        client.post("/messages", json={"content": "hello everyone", "recipient": "all"}, headers=auth(alice_token))
+
+        bob_msgs = client.get("/messages", headers=auth(bob_token)).json()
+        assert any(m["content"] == "hello everyone" for m in bob_msgs)
+
+
 # ===========================================================================
 # 4. SSE stream tests
 # ===========================================================================
@@ -258,6 +268,20 @@ class TestSSE:
         received = await asyncio.wait_for(alice_q.get(), timeout=2)
         assert received["content"] == "hello bob"   # got her own message
         assert alice_q.empty()                       # nothing else in the queue
+
+    def test_online_users_requires_auth(self, client):
+        r = client.get("/users/online")
+        assert r.status_code in (401, 403)
+
+    def test_online_users_returns_connected(self, client):
+        from server.broadcaster import broadcaster
+        token = register_and_login(client)
+        # simulate a connected user by subscribing directly
+        q = broadcaster.subscribe("alice")
+        r = client.get("/users/online", headers=auth(token))
+        assert r.status_code == 200
+        assert "alice" in r.json()["online_users"]
+        broadcaster.unsubscribe("alice", q)
 
     @pytest.mark.asyncio
     async def test_broadcaster_unsubscribe(self):
